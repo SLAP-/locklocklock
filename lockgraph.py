@@ -1,5 +1,5 @@
 """SLAP-
-$ Time-stamp: <2011-09-06 14:42:50 jonatanlinden>
+$ Time-stamp: <2011-12-15 15:19:01 jonatanlinden>
 
 README:
 A collection of tools to do a queueing network analysis on sequences
@@ -14,17 +14,226 @@ import os,re,csv,subprocess,math
 import numpy as np
 import numpy.ma as ma
 import operator as op
-from mva import mva, mva_multiclass
+from mva import st_mva, mva_multiclass
 import histo
 from itertools import *
+import logging
+
+logging.basicConfig(format="%(funcName)s: %(message)s", level=logging.DEBUG)
 
 # CONSTANTS
 
-ADDR2LINEPATH = "addr2line-x86_64-elf"
+def enum(**enums):
+    return type('Enum', (), enums)
 
+def has_next(it):
+    # the pythonian way of peeking at an iterator
+    try:
+        first = it.next()
+    except StopIteration:
+        return False
+    else:
+        it = chain([first], iter)
+        return True
+
+def startBucket (val, bucketsize):
+    return int(bucketsize * math.floor(float(val)/bucketsize))
+
+def endBucket (val, bucketsize):
+    return int (bucketsize * math.ceil (float(val)/bucketsize))
+
+
+# OBJECT
+
+class LockTrace:
+    
+    def __init__(self, path):
+        (self.tryD, self.acqD, self.relD, self.namesD) = parseDicTuple(path)
+
+    def start_ts(self):
+        return elem_from_list_dic(self.tryD, 0)
+
+    def end_ts(self):
+        return elem_from_list_dic(self.tryD, -1)
+
+    def delete_thread(self, pos_idx):
+        key = self.tryD.keys()[pos_idx]
+        del self.tryD[key]
+        del self.acqD[key]
+        del self.relD[key]
+        return key
+
+    def set_classes(self, class_l):
+        self.classes = class_l
+
+    def analyze(self):
+        if self.classes:
+            res_tmp = multi_analyze(self.tryD, self.acqD, self.relD, self.namesD, self.classes)
+            (self.rout_l, self.serv_rates, self.q_type, self.wait_t) = (res_tmp[0], res_tmp[1], res_tmp[3], res_tmp[4])
+
+        else:
+            print "Classes undefined"
+
+    def mva(self):
+        if not self.rout_l:
+            analyse(self)
+        res_tmp = multiclass_mva(self.rout_l, self.serv_rates, tuple(map(len, self.classes)), self.q_type)
+        self.T = res_tmp[0]
+        self.N = res_tmp[1]
+        return self.T[1::2]
+
+    def wait(self, cls):
+        if self.T:
+            return zip(T[:,cls][1::2],1/self.serv_rates[:,cls][1::2], self.wait_t[:,cls])
+
+    timelines = enum(WAIT=1, QUEUE=2, SERV=3, INTER=4)
+
+    def time_line (trace, kind, use_class=False):
+        if   kind == timelines.INTER:
+            f = tl_inter
+        elif kind == timelines.SERV:
+            f = tl_serv
+            
+        tls = map (f, trace.tryD.values(), trace.acqD.values(), trace.relD.values(), trace.tryD.keys())
+        if use_class and trace.classes:
+            return [sorted(merge_lists(idx(cl, tls))) for cl in trace.classes]
+        else:
+            return sorted(merge_lists(tls))
+
+
+    
+
+    def tl_serv (startSeq, middleSeq, endSeq, tag):
+        return map (lambda (i,x): (x[1], endSeq[i][1] - x[1], tag, x[0]), enumerate (startSeq))
+
+    def tl_inter (startSeq, middleSeq, endSeq, tag):
+        return map (lambda (i,x): (x[1], x[1] - endSeq[i][1], tag, endSeq[i][0], x[0]), enumerate (startSeq[1:]))
+
+#def visitratio (lt):
+    # pick the reference queue
+    
+
+
+# sorted_tl, list of arrival timestamps of locks for one specific lock according to timeslines.INTER
+def autocorr_lag_k (tl, timestep, lag):
+    start = endBucket(tl[0][0], timestep)
+    mean = len(tl)/((tl[-1][0] - tl[0][0])/timestep)
+    ret = []
+    timeLine = tl
+    for i in count(start, timestep):
+        onestep = list(takewhile(lambda x: x[0] < i, timeLine))
+        timeLine = dropwhile(lambda x: x[0] < i, timeLine)
+        ret.append(len(onestep))
+            # the pythonian way of peeking at an iterator
+        try:
+            first = timeLine.next()
+        except StopIteration:
+            break
+        else:
+            timeLine = chain([first], timeLine)
+
+    corr = 0
+    variance = 0
+
+    for i in range(lag):
+        variance += math.pow(ret[i] - mean, 2.0)
+        
+    for i in range(lag, len(ret)):
+        corr += (ret[i - lag] - mean)*(ret[i] - mean)
+        variance += math.pow(ret[i] - mean, 2.0)
+        
+    corr /= len(ret) - lag
+    variance /= len(ret)
+
+    return mean, corr/variance
+
+def interval(tl, start=None, end=None):
+    if not (start or end):
+        return None
+    if end:
+        tl = takewhile(lambda x: x[0] < end, tl)
+    if start:
+        tl = dropwhile(lambda x: x[0] < start, tl)
+    return tl
+
+def dropwhile(predicate, iterable):
+    # dropwhile(lambda x: x<5, [1,4,6,4,1]) --> [(6,2), 4,1]
+    iterable = iter(iterable)
+    cnt = 0
+    for x in iterable:
+        cnt += 1
+        if not predicate(x):
+            yield (x, cnt)
+            break
+    for x in iterable:
+        yield x
+
+# the same as before, but this time describes the relation between two groups of timestamps
+def corr_lag_k2 (tl0, tl1, timestep, lag):
+    # only analyse the part the sequences have in common
+    st = max(tl0[0][0], tl1[0][0])
+    en = min(tl0[-1][0], tl1[-1][0])
+    # pad time frames to look nice
+    start = startBucket(st, timestep) 
+    end = endBucket(en, timestep)
+    tl02 = list(interval(tl0, start=start, end=end))
+    tl12 = list(interval(tl1, start=start, end=end))
+
+    # mean number of accesses per time frame
+    steps = (end - start)/float(timestep)
+    mean0 = len(tl02)/steps
+    mean1 = len(tl12)/steps
+
+    ret0 = []
+    ret1 = []
+    timeLine0 = tl02
+    timeLine1 = tl12
+    for i in range(start, end + 1, timestep):
+
+        timeLine0,cnt = drop2(timeLine0, i+timestep).next()
+
+        #not working correctly if iterator is not evaluated at each step
+        #timeLine0 = interval(timeLine0, start=i)
+        timeLine0 = list(interval(timeLine0, start=i))
+        
+        ret1.append(len(list(interval(timeLine1, end=i+timestep))))
+        #not working correctly if iterator is not evaluated at each step
+        #timeLine1 = interval(timeLine1, start=i)
+        timeLine1 = list(interval(timeLine1, start=i))
+
+    corr = 0
+    variance0 = 0
+    variance1 = 0
+
+    # the inital part of the sequences should be taken into account when calc. abs. variance
+    for i in range(lag):
+        variance0 += math.pow(ret0[i] - mean0, 2.0)
+        variance1 += math.pow(ret1[i] - mean1, 2.0)
+        
+    for i in range(lag, len(ret0)):
+        # this defines correlation between arrival of t0 and an arrival of
+        # sequence t1 lag*timestep timeunits later
+        corr += (ret0[i - lag] - mean0)*(ret1[i] - mean1)
+        variance0 += math.pow(ret0[i] - mean0, 2.0)
+        variance1 += math.pow(ret1[i] - mean1, 2.0)
+
+    # get means over appropriate sequences
+    corr /= len(ret0) - lag 
+    variance0 /= len(ret0)
+    variance1 /= len(ret1)
+
+    # the joint variance defined through the streams std. dev.
+    vari = math.sqrt(variance0*variance1) 
+    
+    
+    return corr/vari # normalised according to the absolute variance
+
+
+    
 
 # --------------------------------------------------------------------------
 # UTILS
+
 
 def findGr8estKey (dic):
     '''returns the greatest key found in a nested dictionary of two levels
@@ -48,6 +257,9 @@ def dictToArray (dict):
     return arr
 
 def dictToMatrix (dict, dim = 0):
+    '''Converts a two-level nested dictionary to a matrix, where the rows are given by
+    the values of the outer dictionary.
+    '''
     if dim == 0:
         dim = findGr8estKey (dict) + 1
     mtx = np.zeros ((dim, dim))
@@ -107,10 +319,16 @@ def listOfArrToMtx (list):
         mtx[i,0:len(row)] = row
     return mtx
 
-def imax(l, _key=None):
+def imax(l, key=None):
     '''Indexed max function
     '''
-    return l.index(max(l, key=_key))
+    return l.index(max(l, key=key))
+
+def imin(l, key=None):
+    '''Indexed max function
+    '''
+    return l.index(min(l, key=key))
+
 
 def count(firstval=0, step=1):
     '''start, start+step, start+2*step, ...
@@ -120,7 +338,7 @@ def count(firstval=0, step=1):
         yield x
         x += step
 
-def mergeLists(lls):
+def merge_lists(lls):
     '''Flattens a list of lists.
     '''
     return [item for sublist in lls for item in sublist]
@@ -128,6 +346,19 @@ def mergeLists(lls):
 
 def partsOfList(l, idxsL):
     return op.itemgetter(*idxsL)(l)
+
+def mysum(l):
+    s2 = 0
+    s = 0
+    for e in l:
+        s += e
+        s2 += e * e
+    return (s, s2)
+
+def idx(idxl, l):
+    if len (idxl) == 1:
+        return [l[idxl[0]]]
+    return op.itemgetter(*idxl)(l)
 
 
 # end UTILS
@@ -162,7 +393,7 @@ def lockDictFromRecords(recFile):
     '''Parses a record on the format "tsc tID lID" and returns a
     dictionary where the key is the thread id, and the value is an
     ordered list of (lID, tsc) tuples. Assumes that the list is sorted
-    in increasing order by timestamp
+    in increasing order by timestamp (at least per thread id, row[1])
     '''
     tidDict = defaultdict(list)
     recReader = csv.reader (recFile, delimiter=' ', skipinitialspace=True)
@@ -291,7 +522,7 @@ def totalTimeWasted (anyDic, waitTVec, servTVec):
     return sum (waitSum.itervalues())
 
 
-def avgWaitTime (tryLockSeq, relLockSeq, perc=100, dim=0):
+def avgWaitTime (tryLockSeq, relLockSeq, dim=0):
     """Calculates average waiting time (service time + queue time) per lock
     INPUT: tryLockSeq, relLockSeq : a tuple list of the form (lockID, timestamp)
     """
@@ -300,26 +531,32 @@ def avgWaitTime (tryLockSeq, relLockSeq, perc=100, dim=0):
     if dim==0:
         dim = max (timeD.keys()) + 1
     arr = np.zeros(dim)
+    arr2 = np.zeros(dim)
     # the number of accesses to each lock will be defined by the length of
     # each dictionary value
     countArr = np.zeros(dim)
     for k,v in timeD.iteritems():
         countArr[k] = len(v)
-        v.sort()
-        hi = perc*len(v)/100
-        arr[k] = float(sum(v[0:hi])) / (hi)
-    return (arr, countArr)
+        s1, s2 = mysum(v)
+        arr[k] = float(s1) / len(v)
+        arr2[k] = float(s2) /len(v)
+
+    return (arr, arr2, countArr)
+    
 
 
-def servTime (acqSeqL, relSeqL, perc=100, dim=0):
-    servTimeList = map (lambda x,y: avgWaitTime(x,y, perc, dim), acqSeqL, relSeqL)
-    servTimes, counts = zip (*servTimeList)
+
+def servTime (acqSeqL, relSeqL, dim=0):
+    servTimeList = map (lambda x,y: avgWaitTime(x,y, dim), acqSeqL, relSeqL)
+    servTimes, servTimesSq, counts = zip (*servTimeList)
     servTimesMtx = listOfArrToMtx (servTimes)
+    servTimesSqMtx = listOfArrToMtx (servTimesSq)
     countMtx = listOfArrToMtx (counts)
     # norm of columns
     norms = normalizeRowWise(countMtx.T).T
     ma_servTimesMtx = ma.array(servTimesMtx, mask = servTimesMtx == 0)
-    return ma.average (ma_servTimesMtx, axis=0, weights=norms)
+    ma_servTimesSqMtx = ma.array(servTimesSqMtx, mask = servTimesSqMtx == 0)
+    return ma.average (ma_servTimesMtx, axis=0, weights=norms), ma.average(ma_servTimesSqMtx, axis=0, weights=norms)
 
 
 def sumTimeMtx (trySeq, relSeq, dim = 0):
@@ -335,10 +572,20 @@ def sliceSeqs (tryD, acqD, relD, start=0, end=0):
             newAcqD[k] = acqD[k][0:len(newTryD[k])]
             newRelD[k] = relD[k][0:len(newTryD[k])]
     if start != 0:
-        raise NotImplementedError
+        for k,v in tryD.iteritems():
+            newTryD[k] = list(dropwhile(lambda x: x[1] < start, v))
+            newAcqD[k] = acqD[k][len(tryD[k]) - len(newTryD[k]):]
+            newRelD[k] = relD[k][len(tryD[k]) - len(newTryD[k]):]
     return (newTryD, newAcqD, newRelD)
 
 
+
+def doubleDimWithZeros (arr):
+    newdim = len (arr)*2
+    t = ma.zeros(newdim)
+    for i in range(0, newdim, 2):
+        t[2*i+1] = arr[i]
+    return t
 
 
 def insertIntermediateQs (rMatrix, tMatrix, tArray):
@@ -384,6 +631,13 @@ def interArrivalMtx (tryDic, relDic, dim=0):
     return sumMatrices ([sumTimeMtx(x, y, dim) for (x,y) in zip(tryDic, relDic)])
 
 
+def elem_from_list_dic(tDic, idx):
+    return map(lambda x: tDic[x][idx], tDic.keys())
+
+def first_and_last_thread(tDic):
+    tmax = imax(elem_from_list_dic(tDic, -1), key=op.itemgetter(1))
+    tmin = imin(elem_from_list_dic(tDic,  0), key=op.itemgetter(1))
+    return tDic.keys()[tmax], tDic.keys()[tmin]
 
 
 
@@ -391,22 +645,35 @@ def interArrivalMtx (tryDic, relDic, dim=0):
 # --------------------------------------------------------------------------
 # entry points of application
 
-
-def multi_analyze (tryDic, acqDic, relDic, namesVec, classL):
+# classL : list of lists, where each list contains the thread id's of one specific class.
+def multi_analyze (tryDic, acqDic, relDic, namesVec, classL, overhead=0.0):
 #generate routing, serv.time and interarrivals
     routCntL = []
     servTimeVecL = []
+    servTimeSqVecL = []
     avgIAML = []
     waitTimeVecL = []
-    nLocks = 1
+    nLocks = (max ([max (x, key=op.itemgetter(0)) for x in idx(merge_lists(classL), tryDic.values())], key=op.itemgetter(0)))[0] + 1
+
+    # same serv time for all threads
+    #servTimeVec, _ = servTime (acqDic.values(), relDic.values(),dim=nLocks)
+    #cntTotalM = routingCntMtx(tryDic.values())
+    #sumInterArrivalTotalM = interArrivalMtx (tryDic.values(), relDic.values())
+    #r = np.maximum(cntTotalM, np.ones_like (cntTotalM))
+    #avgInterArrivalTotalM = np.divide (sumInterArrivalTotalM, r)
+    #rout = normalizeRowWise (cntTotalM)
+    #_, servTimes = insertIntermediateQs (rout, avgInterArrivalTotalM, servTimeVec)
+    #end same serv time
+
     for cl in classL:
-        print cl
-        trySeqL = [op.itemgetter(*cl)(tryDic.values())]
-        acqSeqL = [op.itemgetter(*cl)(acqDic.values())]
-        relSeqL = [op.itemgetter(*cl)(relDic.values())]
+        trySeqL = idx(cl, tryDic.values())
+        acqSeqL = idx(cl, acqDic.values())
+        relSeqL = idx(cl, relDic.values())
         routCntL.append(routingCntMtx(trySeqL, nLocks))
-        servTimeVecL.append(servTime(acqSeqL, relSeqL, dim=nLocks))
-        waitTimeVecL.append(servTime(trySeqL, relSeqL, dim=nLocks))
+        serv, servSq = servTime(acqSeqL, relSeqL, dim=nLocks)
+        servTimeVecL.append(serv)
+        wait, _ = servTime(trySeqL, relSeqL, dim=nLocks)
+        waitTimeVecL.append(wait)
         r = np.maximum(routCntL[-1], np.ones_like (routCntL[-1]))
         sumInterArrivalM = interArrivalMtx (trySeqL, relSeqL, nLocks)
         avgIAML.append(np.divide (sumInterArrivalM, r))
@@ -414,31 +681,36 @@ def multi_analyze (tryDic, acqDic, relDic, namesVec, classL):
     routL = map (normalizeRowWise, routCntL)
     IQs = map (insertIntermediateQs, routL, avgIAML, servTimeVecL)
     newRoutL, newServTimeVecL = zip (*IQs)
+
+    #newServTimeVecL = list(repeat(servTimes, len(newRoutL)))
     
-    # a class/serv.time.vector matrix
-    servTimeM = np.zeros((len(classL), len(newServTimeVecL[0])))
-    for i, x in enumerate (newServTimeVecL):
-        servTimeM[i] = x
+    servTimeM = listOfArrToMtx (newServTimeVecL)
     qt = list(islice(cycle((1,0)), nLocks*2))
 
     ma_servTimeM = ma.array(servTimeM, mask = servTimeM == 0.0)
+    ma_servTimeM[1::2] = ma_servTimeM[1::2] + overhead
     servTimeM2 = 1.0/ma_servTimeM
 
     cntPerClass = map (np.sum, routCntL)
+    cntClassLock = zip(*[np.sum(x, axis=0) for x in routCntL])
+    
+    waitTimeVectors = np.array(map(list, zip(*[l.filled(0) for l in waitTimeVecL])))
 
-    return newRoutL, servTimeM2.T, tuple(map(len, classL)), qt, zip(*map(ma.getdata, waitTimeVecL)), avgIAML, cntPerClass
+    return newRoutL, servTimeM2.T, tuple(map(len, classL)), qt, waitTimeVectors, avgIAML, routCntL
 
 
-def analyze (tryDic, acqDic, relDic, namesVec, numT, smoothing, overheadF = lambda x: x):
+def analyze (tryDic, acqDic, relDic, namesVec, numT,overheadF = lambda x: x):
 
     cntTotalM = routingCntMtx(tryDic.values())
     sumInterArrivalTotalM = interArrivalMtx (tryDic.values(), relDic.values())
-
+    nLocks = (max ([max (x, key=op.itemgetter(0)) for x in tryDic.values()], key=op.itemgetter(0)))[0] + 1
+    
     # sanity check
     if sumInterArrivalTotalM.shape[0] != cntTotalM.shape[0]:
         print "WARNING: count matrix not same size as interarrival time matrix."
 
-    servTimeVec = servTime (acqDic.values(), relDic.values(), 100 - smoothing)
+    servTimeVec, servTimeVecSq = servTime (acqDic.values(), relDic.values(),dim=nLocks)
+
     servTimeVecWithOH = overheadF(servTimeVec)
 
     # calculate avg transition time
@@ -451,19 +723,21 @@ def analyze (tryDic, acqDic, relDic, namesVec, numT, smoothing, overheadF = lamb
 
 def runandprintmva (rout, servRates, numT, tryDic, relDic, namesVec, cntTotalM):
     # mva it
-    estimate = mva (rout, servRates, numT)
+    T,N = st_mva (rout, servRates, numT)
+    servRates = servRates.compressed()
     servTimes = 1/servRates[1::2]
-    estincr  = (estimate*servRates)[1::2]
+    estincr  = (T*servRates)[1::2]
 
     cntTot = np.sum (cntTotalM, axis=0)
 
     # actual waiting time for numT threads
-    actualWait = servTime(tryDic.values(), relDic.values())
+    _actualWait, _ = servTime(tryDic.values(), relDic.values())
+    actualWait = _actualWait.compressed()
+    
+    for i,e in enumerate (T[1::2]):
+        print '%s : act: %6.0f, est: %6.0f, serv: %6.0f, est.incr: %1.3f, acc: %d' % (namesVec[i], actualWait[i], T[1::2][i], servTimes[i], estincr[i], cntTot[i])
 
-    for i,e in enumerate (estimate[1::2]):
-        print '%s : act: %6.0f, est: %6.0f, serv: %6.0f, est.incr: %1.3f, acc: %d' % (namesVec[i], actualWait[i], estimate[1::2][i], servTimes[i], estincr[i], cntTot[i])
-
-    return zip (namesVec, actualWait, estimate[1::2], servTimes)
+    return zip (namesVec, actualWait, T[1::2], servTimes, N[1::2])
 
 
 
