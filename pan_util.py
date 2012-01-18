@@ -218,15 +218,16 @@ def get_derivative_analysis(n):
 	uphill_classL = (10,10,10)
 	(newTryDict,newAcqDict,newRelDict) = keep_ts_in_range(tryDic,acqDic,relDic,start_time,class1EndT)
 	res_up =  global_mva_analysis(newTryDict, newAcqDict,newRelDict,namesD,classL) #res_up returns tuple ()
-	print "res_up:", res_up
 	for n in (393,798,1152,1578,2032,2517,3050,3604,4093,4477): #n is the number of items to be done
 	#Do the uphill analysis for the different number of items left in the queue
 		#print "at the end classL:", classL
 		#print "service rate of lock 0 for 222 case:", res_up[1][lock_idx]
 		#print "newly calculated service time for lock 0:", (a_up*n+b_up)
 		#if we recalculate the service time for all the locks with the linear equation
-		print "the size of res_up:", len(res_up)
-		res_up[1][lock_idx][class3_idx] = 1.0/(a_up*n+b_up)
+		print "the size of res_up[1]:", len(res_up[1])
+		for i in range(0,len(res_up[1])/2):
+			#res_up[1][lock_idx][class3_idx] = 1.0/(a_up*n+b_up) #res_up is the service time matrix
+			res_up[1][i*2+1][class3_idx] = 1.0/(a_up*n+b_up) #res_up is the service time matrix
 		#res_up[1][lock_idx][class1_idx] = 1.0/(a_up*n+b_up)
 		ana = mva_multiclass(res_up[0],res_up[1],uphill_classL,res_up[3]) #the second parameter is the service rate, not the service time
 		print "analyzed class 3:",  ana[0][1,class3_idx] #1 is the place of the first lock	#ana[0] is the waiting time matrix, [1::2]: gets every other row
