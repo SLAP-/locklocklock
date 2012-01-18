@@ -1,15 +1,19 @@
 #!/usr/bin/python
+from scipy import linspace, polyval, polyfit, sqrt, stats, randn
 import sys
 from lockgraph import *
 
 if_print = 1
-throu1 = []
-throu3 = []
-throu_diff = []
 classList = []
 n_item1 = []
 n_item3 = []
 item_diff = []
+
+def print_list_vertical(l,name):
+	print "printing list", name	
+	for i in l:
+		print i
+
 #def update_classL(threadL_todelete,classL):
 #	for c in classL:
 def keep_ts_in_range(tryDict,acqDict,relDict,start_ts,end_ts):
@@ -22,7 +26,7 @@ def keep_ts_in_range(tryDict,acqDict,relDict,start_ts,end_ts):
 		newAcqDict[k] = []
 		i = 0
 		for t in v:
-			if t[1] >= start_ts and t[1] <= end_ts: #the tuple index starts from 0, if the timestamp falls in the rage
+			if t[1] > start_ts and t[1] <= end_ts: #the tuple index starts from 0, if the timestamp falls in the rage
 				newRelDict[k].append(t)
 				newTryDict[k].append(tryDict[k][i])
 				newAcqDict[k].append(acqDict[k][i])
@@ -82,7 +86,7 @@ def count_entries(tryDict, classID, lockID):
 					count = count + 1
 	return count 
 	
-def slotted_analyzed(start,end,nDiv,slot_size,tryDic,acqDic,relDic,namesD,n,if_class1_finished):
+def slotted_analyzed(start,end,nDiv,slot_size,tryDic,acqDic,relDic,namesD,n):
 	if nDiv:
 		slot_size = (end - start)/nDiv
 	else:
@@ -96,7 +100,6 @@ def slotted_analyzed(start,end,nDiv,slot_size,tryDic,acqDic,relDic,namesD,n,if_c
 	t = []
 
 	for i in range(nDiv):
-		print "slot ", i, ":"
 		slot_start = start + i*slot_size 
 		if i == nDiv - 1:
 			slot_end = end
@@ -108,10 +111,6 @@ def slotted_analyzed(start,end,nDiv,slot_size,tryDic,acqDic,relDic,namesD,n,if_c
 		newClassL = getClassL (newTryDict.keys(),tryDic.keys(),n)
 		#print "newClassL:", newClassL
 
-		#get the number of lock accesses for a specific class for a specific lock
-		print "count class 0:",count_entries(newTryDict,0,0)
-		print "count class 1:",count_entries(newTryDict,2,0)
-
 		res = multi_analyze(newTryDict, newAcqDict, newRelDict, namesD, newClassL)
 		measured = res[4][0] #first lock waiting time
 		#print "measured:", measured
@@ -122,7 +121,7 @@ def slotted_analyzed(start,end,nDiv,slot_size,tryDic,acqDic,relDic,namesD,n,if_c
 		#print "newnewClassL:", newnewClassL
 		classVector = tuple(map(len,newnewClassL))
 		#analyzed = mva_multiclass(*res[:4])[0]
-		#print "classVector:", classVector
+		print "classVector:", classVector
 		ana = mva_multiclass(res[0],res[1],classVector,res[3])
 		analyzed = ana[0]
 		#print "Multiclass MVA:", analyzed[1]
@@ -134,27 +133,7 @@ def slotted_analyzed(start,end,nDiv,slot_size,tryDic,acqDic,relDic,namesD,n,if_c
 		n3 = count_entries(newTryDict,2,0)
 		n_item3.append(n3)
 		item_diff.append(sum(n_item1) - sum(n_item3))
-
 		
-		if len(measured) == 3:
-			throu1.append(ana[2][1][0]*1e9)
-			throu3.append(ana[2][1][2]*1e9)
-			throu_diff.append(sum(throu1) - sum(throu3))
-
-			#print "throughput 1: ",ana[2][1][0]*1e9,"throughput 3: ",ana[2][1][2]*1e9,"difference: ",(ana[2][1][0] - ana[2][1][2])*1e9
-		if len(measured) == 2:
-			if not if_class1_finished:
-				throu1.append(ana[2][1][0]*1e9)
-			throu3.append(ana[2][1][1]*1e9)
-			#throu_diff.append(ana[2][1][0]*1e9 - ana[2][1][1]*1e9)
-			throu_diff.append(sum(throu1) - sum(throu3))
-			#print "throughput 1: ",ana[2][1][0]*1e9,"throughput 3:",ana[2][1][1]*1e9,"throughput difference",(ana[2][1][0] - ana[2][1][1])*1e9
-		if len(measured) == 1:
-			throu3.append(ana[2][1][0]*1e9)
-			#throu_diff.append(-ana[2][1][0]*1e9)
-			throu_diff.append(sum(throu1)-sum(throu3))
-			#print "throughput of consumer",ana[2][1][0]*1e9
-
 		if len(measured) == 3:
 			m1.append(measured[0])
 			m3.append(measured[2])
@@ -173,31 +152,35 @@ def slotted_analyzed(start,end,nDiv,slot_size,tryDic,acqDic,relDic,namesD,n,if_c
 			m3.append(measured[0])
 			a3.append(analyzed[1][0])
 			s3.append(serv[0][0])
-	if if_print:
-		print "m1:"
-		for i in m1:
-			print i 
-		print "m3:"
-		for i in m3:
-			print i 
-		print "a1:"
-		for i in a1:
-			print i 
-		print "a3:"
-		for i in a3:
-			print i
-		print "s1:"
-		for i in s1:
-			print i 
-		print "s3:"
-		for i in s3:
-			print i
-	return slot_size
+	print_list_vertical(a3,"analyzed class 3")
+
+	if len(s3) == len(item_diff):
+		return slot_size, s3, item_diff
+	else:
+		return slot_size, s3, item_diff[len(item_diff) - len(s3):]
+		
+
+def get_class_end_time(start_time,classList,classID, relDic):
+	end_time = start_time
+	for id in classList[classID]:
+		if len(relDic[id]) > 0:
+			for(lock,ts) in relDic[id]:
+				if ts > end_time:
+					end_time = ts
+	return end_time
+def global_mva_analysis(tryDic, acqDic,relDic,namesD,classL):
+	print "Global analysis:"
+	res = multi_analyze(tryDic, acqDic, relDic, namesD, classL)
+	measured = res[4]
+	analyzed = mva_multiclass(*res[:4])[0]
+	return res
 
 def get_derivative_analysis(n):
-	#(tryDic, acqDic, relDic, namesD) = parseDicTuple ('./dedup_run_on_halvan/dedup_10th_32c_110805/dedup.native.10th.halvan')
+	class1_idx = 0
+	class3_idx = 2
+	ts_idx = 1
+	lock_idx = 0
 	print "Parsing input file:",sys.argv[1]
-	#(tryDic, acqDic, relDic, namesD) = parseDicTuple ('./dedup_run_on_halvan/dedup_10th_32c_random_input/dedup.native.10th.halvan.random')
 	(tryDic, acqDic, relDic, namesD) = parseDicTuple (sys.argv[1])
 	map(lambda x:x[0],tryDic.values())
 	#print "tryDic keys:", tryDic.keys()
@@ -213,54 +196,40 @@ def get_derivative_analysis(n):
 	del acqDic[seq_stage_id]
 	del relDic[seq_stage_id]
 
-	end_time = maxT(relDic.values(),1)[1] #the timestamp is the second element in the tuple
-	start_time = minT(tryDic.values(),1)[1]
-	print "start_time:", start_time, "end_time:", end_time,"Total time:", end_time - start_time
-	
-	#class 1 end time
-	class1EndT = start_time
-	for id in (classList[0]):
-		if len(relDic[id]) > 0 :
-			for (lock,ts) in  relDic[id]:
-				if ts > class1EndT:
-					class1EndT = ts
-	print "class 1 end time:", class1EndT 
-	
-	#print "Global analysis:"
-	#res = multi_analyze(tryDic, acqDic, relDic, namesD, classL)
-	#measured = res[4]
-	#analyzed = mva_multiclass(*res[:4])[0]
-	#print "measured class 1:", measured[:,0:1:1]
-	#print "analyzed class 1:",  analyzed[1::2,0:1:1]
-	#print "measured class 3:", measured[:,2::]
-	#print "analyzed class 3:",  analyzed[1::2,2::]
+	end_time = maxT(relDic.values(),1)[ts_idx] #the timestamp is the second element in the tuple
+	start_time = minT(tryDic.values(),1)[ts_idx]
+	#print "start_time:", start_time, "end_time:", end_time,"Total time:", end_time - start_time
+	class1EndT =  get_class_end_time(start_time,classList, class1_idx, relDic) #0 is the class index
 
 	l = filter(lambda x: x!= [], relDic.values())
 	startRel = minT(l,1)[1]
 	endRel = maxT(l,1)[1]
 
 	print "Doing analysis before class 1 threads end"
-	slot_size = slotted_analyzed(start_time,class1EndT,10,0,tryDic,acqDic,relDic,namesD,n,0)
+	#slot_size = slotted_analyzed(start_time,class1EndT,10,0,tryDic,acqDic,relDic,namesD,n,0)
+	slot_size,service3_up,n_token_up = slotted_analyzed(start_time,class1EndT,10,0,tryDic,acqDic,relDic,namesD,n)
+	(a_up,b_up) = polyfit(n_token_up,service3_up,1)
+	print "result of polyfit: a_up:", a_up, "b_up:",b_up
 	print "Doing analysis after class 1 threads end"
-	slotted_analyzed(class1EndT,end_time,0,slot_size,tryDic,acqDic,relDic,namesD,n,1)
-	if if_print:
-		print "throu1:"
-		for i in throu1:
-			print i
-		print "throu3:"
-		for i in throu3:
-			print i
-		print "throughput difference:"
-		for i in throu_diff:
-			print i
-	print "n_item1"
-	for i in n_item1:
-		print i
-	print "n_item3"
-	for i in n_item3:
-		print i
-	print "item_diff"
-	for i in item_diff:
-		print i
-
-get_derivative_analysis(10)
+	sii,service3_down,n_token_down = slotted_analyzed(class1EndT,end_time,0,slot_size,tryDic,acqDic,relDic,namesD,n)
+	(a_down,b_down) = polyfit(n_token_down,service3_down,1)
+	print "result of downhill polyfit of the (amount of work, class 3 service time): a_down:", a_down, "b_down:",b_down
+	predicted3 = []
+	uphill_classL = (10,10,10)
+	(newTryDict,newAcqDict,newRelDict) = keep_ts_in_range(tryDic,acqDic,relDic,start_time,class1EndT)
+	res_up =  global_mva_analysis(newTryDict, newAcqDict,newRelDict,namesD,classL) #res_up returns tuple ()
+	print "res_up:", res_up
+	for n in (393,798,1152,1578,2032,2517,3050,3604,4093,4477): #n is the number of items to be done
+	#Do the uphill analysis for the different number of items left in the queue
+		#print "at the end classL:", classL
+		#print "service rate of lock 0 for 222 case:", res_up[1][lock_idx]
+		#print "newly calculated service time for lock 0:", (a_up*n+b_up)
+		#if we recalculate the service time for all the locks with the linear equation
+		print "the size of res_up:", len(res_up)
+		res_up[1][lock_idx][class3_idx] = 1.0/(a_up*n+b_up)
+		#res_up[1][lock_idx][class1_idx] = 1.0/(a_up*n+b_up)
+		ana = mva_multiclass(res_up[0],res_up[1],uphill_classL,res_up[3]) #the second parameter is the service rate, not the service time
+		print "analyzed class 3:",  ana[0][1,class3_idx] #1 is the place of the first lock	#ana[0] is the waiting time matrix, [1::2]: gets every other row
+		predicted3.append(ana[0][1,class3_idx])
+	print_list_vertical(predicted3,"predicted class 3")
+get_derivative_analysis(2)
