@@ -55,10 +55,3 @@ def runmepan(msg):
         print newRates
         l,T = mva_multiclass([rout,rout], newRates, (2,2), [1,0,1,0])
         print l[0],l[1]
-
-
-
-
-
-
-    

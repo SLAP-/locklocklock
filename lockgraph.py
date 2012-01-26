@@ -14,7 +14,8 @@ import os,re,csv,subprocess,math
 import numpy as np
 import numpy.ma as ma
 import operator as op
-from mva import st_mva, mva_multiclass
+#from mva import st_mva, mva_multiclass
+from mva import mva_multiclass
 import histo
 from itertools import *
 import logging
@@ -642,18 +643,39 @@ def first_and_last_thread(tDic):
 
 
 
-# --------------------------------------------------------------------------
-# entry points of application
-
-# classL : list of lists, where each list contains the thread id's of one specific class.
-def multi_analyze (tryDic, acqDic, relDic, namesVec, classL, overhead=0.0):
+def multi_serviceTime (tryDic, acqDic, relDic, namesVec, classL, overhead=0.0):
 #generate routing, serv.time and interarrivals
+    #print "in multi_serviceTime, classL", classL
     routCntL = []
     servTimeVecL = []
     servTimeSqVecL = []
     avgIAML = []
     waitTimeVecL = []
     nLocks = (max ([max (x, key=op.itemgetter(0)) for x in idx(merge_lists(classL), tryDic.values())], key=op.itemgetter(0)))[0] + 1
+    #nLocks = 57
+    for cl in classL:
+        trySeqL = idx(cl, tryDic.values())
+        acqSeqL = idx(cl, acqDic.values())
+        relSeqL = idx(cl, relDic.values())
+        routCntL.append(routingCntMtx(trySeqL, nLocks))
+        serv, servSq = servTime(acqSeqL, relSeqL, dim=nLocks)
+        servTimeVecL.append(serv)
+    return servTimeVecL
+# --------------------------------------------------------------------------
+# entry points of application
+
+# classL : list of lists, where each list contains the thread id's of one specific class.
+def multi_analyze (tryDic, acqDic, relDic, namesVec, classL, overhead=0.0):
+#generate routing, serv.time and interarrivals
+    #print "in multi_analyze, classL", classL
+    routCntL = []
+    servTimeVecL = []
+    servTimeSqVecL = []
+    avgIAML = []
+    waitTimeVecL = []
+    #nLocks = (max ([max (x, key=op.itemgetter(0)) for x in idx(merge_lists(classL), tryDic.values())], key=op.itemgetter(0)))[0] + 1
+    nLocks = 57
+    #print "nLocks:", nLocks
 
     # same serv time for all threads
     #servTimeVec, _ = servTime (acqDic.values(), relDic.values(),dim=nLocks)
@@ -666,18 +688,21 @@ def multi_analyze (tryDic, acqDic, relDic, namesVec, classL, overhead=0.0):
     #end same serv time
 
     for cl in classL:
-        trySeqL = idx(cl, tryDic.values())
-        acqSeqL = idx(cl, acqDic.values())
-        relSeqL = idx(cl, relDic.values())
-        routCntL.append(routingCntMtx(trySeqL, nLocks))
-        serv, servSq = servTime(acqSeqL, relSeqL, dim=nLocks)
-        servTimeVecL.append(serv)
-        wait, _ = servTime(trySeqL, relSeqL, dim=nLocks)
-        waitTimeVecL.append(wait)
-        r = np.maximum(routCntL[-1], np.ones_like (routCntL[-1]))
-        sumInterArrivalM = interArrivalMtx (trySeqL, relSeqL, nLocks)
-        avgIAML.append(np.divide (sumInterArrivalM, r))
-
+	if len(cl) > 0:
+		if (len(tryDic.values()) < 2):
+			print "in multi_analyze:",cl, "length of trydic.values():",len(tryDic.values())
+			print "tryDic:", tryDic
+        	trySeqL = idx(cl, tryDic.values())
+        	acqSeqL = idx(cl, acqDic.values())
+        	relSeqL = idx(cl, relDic.values())
+        	routCntL.append(routingCntMtx(trySeqL, nLocks))
+        	serv, servSq = servTime(acqSeqL, relSeqL, dim=nLocks)
+        	servTimeVecL.append(serv)
+        	wait, _ = servTime(trySeqL, relSeqL, dim=nLocks)
+        	waitTimeVecL.append(wait)
+        	r = np.maximum(routCntL[-1], np.ones_like (routCntL[-1]))
+        	sumInterArrivalM = interArrivalMtx (trySeqL, relSeqL, nLocks)
+        	avgIAML.append(np.divide (sumInterArrivalM, r))
     routL = map (normalizeRowWise, routCntL)
     IQs = map (insertIntermediateQs, routL, avgIAML, servTimeVecL)
     newRoutL, newServTimeVecL = zip (*IQs)
