@@ -248,7 +248,7 @@ def get_throughput_from_l(l):
 def iterative_throughput_s_mva(throu1, throu3, s1, s3 ,serv,res,newClassL):
 	print "in iterative_throughput_s_mva:"
 	for i in range(0,5): #TOFIX: change this to convergence condition
-		ana = mva_multiclass(res[0],serv,newClassL,res[3]) #the second parameter is the service rate, not the service time
+		ana = mva_multiclass(res[0],serv,newClassL,res[3]) #do an initial analysis
 		(throu1,throu3) = get_throughput_from_l(ana[2][0])
 		oh = get_contention_overhead(throu1,throu3) #overhead
 		#plug the service time back in
@@ -258,9 +258,9 @@ def iterative_throughput_s_mva(throu1, throu3, s1, s3 ,serv,res,newClassL):
 		print "service 1:", s1
 		print "throughput 1:", throu1
 		print "throughput 3:", throu3
+		#update s3 also
 	
 	return (ana[0][1,class1_idx],ana[0][1,class3_idx]) #ana[0] is the waiting time, ana[2] is the throughput
-		#update s3 also
 
 def predict_another_case(tryDic,acqDic,relDic,start_time,end_time,classL,newClassL,n_items_l,namesD,a1,b1,a3,b3,serv,if_up):
 	predicted3 = []
@@ -285,6 +285,7 @@ def predict_another_case(tryDic,acqDic,relDic,start_time,end_time,classL,newClas
 					#serv[j][i*2+1][class1_idx] = 1.0/(a*n+b) #res_up[1] is the service time matrix
 				serv[j][1][class1_idx] = 1.0/(a1*n+b1) #res_up[1] is the service time matrix
 			ana = mva_multiclass(res[0],serv[j],newClassL,res[3]) #the second parameter is the service rate, not the service time
+
 			#ana[2][0] is the throughput
 			(throu1,throu3) = get_throughput_from_l(ana[2][0])
 			print "throughput:", ana[2][0] #throughput of lock 0
@@ -292,11 +293,12 @@ def predict_another_case(tryDic,acqDic,relDic,start_time,end_time,classL,newClas
 				(w1,w3) = iterative_throughput_s_mva(throu1, throu3, serv[j][1][class1_idx], serv[j][1][class3_idx] ,serv[j],res,newClassL)
 				predicted1_with_contention.append(w1)
 				predicted3_with_contention.append(w3)
+			predicted1.append(ana[0][1,class1_idx]) #ana[0] is the waiting time, ana[2] is the throughput
 			predicted3.append(ana[0][1,class3_idx]) #ana[0] is the waiting time, ana[2] is the throughput
 			#predicted3.append(w3) #ana[0] is the waiting time, ana[2] is the throughput
 			j = j + 1
 	#print_list_vertical(predicted3,"predicted analyzed class 3")
-	return predicted3
+	return predicted1,predicted3, predicted1_with_contention,predicted3_with_contention
 
 def pre_process(filename,n):
 	print "Parsing input file:",filename
@@ -404,17 +406,17 @@ def get_derivative_analysis():
 		uphill_classL = (10,10,10)
 		n_items_l = [216, 654, 1068, 1495, 1981, 2499, 3063, 3667, 4243, 4728]
 		print "predicting uphill:"
-		predicted3_up = predict_another_case(tryDic,acqDic,relDic,start_time,class1EndT,classL,uphill_classL,n_items_l,namesD,a1_up,b1_up,a3_up,b3_up,serv_l_up,1)
+		p1_up,p3_up,p1_w_cont_up, p3_w_cont_up = predict_another_case(tryDic,acqDic,relDic,start_time,class1EndT,classL,uphill_classL,n_items_l,namesD,a1_up,b1_up,a3_up,b3_up,serv_l_up,1)
 
-		print_list_vertical(predicted3_up ,"predicted3_up")
+		#print_list_vertical(predicted3_up ,"predicted3_up")
 		n_items_l = [4743, 4318, 3882, 3439, 2983, 2549, 2131, 1692, 1237, 781, 275]
 		print "predicting downhill:"
 		downhill_classL = (10,)
 		classL = [[0,1]]
 
 		print "serv_l_down size:", len(serv_l_down)
-		predicted3_down = predict_another_case(tryDic,acqDic,relDic,class1EndT,end_time,classL,downhill_classL,n_items_l,namesD,a1_down,b1_down,a3_down,b3_down,serv_l_down,0)
-	print_list_vertical(predicted3_up + predicted3_down ,"predicted3")
+		p1_down,p3_down,p1_w_cont_down,p3_w_cont_down =  predict_another_case(tryDic,acqDic,relDic,class1EndT,end_time,classL,downhill_classL,n_items_l,namesD,a1_down,b1_down,a3_down,b3_down,serv_l_down,0)
+	#print_list_vertical(predicted3_up + predicted3_down ,"predicted3")
 
 get_derivative_analysis()
 #analyze_measured()
