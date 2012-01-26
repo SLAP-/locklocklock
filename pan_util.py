@@ -20,9 +20,10 @@ def print_list_vertical(l,name):
 	for i in l:
 		print i
 
-def get_n_threads_from_dict(d):
-	return d.keys()-1
-
+def get_contention_overhead(t1,t3):
+	a = 8.63685e+09
+	b = -1.27817e+10
+	c = 56357
 def plot_data(x,y,tit,x_label,y_label,color):
 	title(tit)
 	xlabel(x_label)
@@ -220,12 +221,12 @@ def slotted_analyzed(start,end,nDiv,slot_size,tryDic,acqDic,relDic,namesD,n,clas
 		analyzed = ana[0] #ana[0] is the waiting time matrix, ana[1] is the queue length matrix
 		fill_m_and_a(measured,analyzed,m1,m3,a1,a3)
 
-	print_list_vertical(m1,"measured class 1")
-	print_list_vertical(m3,"measured class 3")
-	print_list_vertical(a1,"analyzed class 1")
-	print_list_vertical(a3,"analyzed class 3")
-	print_list_vertical(n_items,"number of items")
-	return serv_l
+	#print_list_vertical(m1,"measured class 1")
+	#print_list_vertical(m3,"measured class 3")
+	#print_list_vertical(a1,"analyzed class 1")
+	#print_list_vertical(a3,"analyzed class 3")
+	#print_list_vertical(n_items,"number of items")
+	return serv_l, m3,a3
 		
 def get_class_end_time(start_time,classList,classID, relDic):
 	end_time = start_time
@@ -265,12 +266,13 @@ def predict_another_case(tryDic,acqDic,relDic,start_time,end_time,classL,newClas
 				serv[j][i*2+1][class3_idx] = 1.0/(a*n+b) #res_up[1] is the service time matrix
 			ana = mva_multiclass(res[0],serv[j],newClassL,res[3]) #the second parameter is the service rate, not the service time
 			
-			print "analyzed class 3:",  ana[0][1,class3_idx] #1 is the place of the first lock	#ana[0] is the waiting time matrix, [1::2]: gets every other row
+			#print "analyzed class 3:",  ana[0][1,class3_idx] #1 is the place of the first lock	#ana[0] is the waiting time matrix, [1::2]: gets every other row
 			predicted3.append(ana[0][1,class3_idx])
 		#throu.append(ana[2][0])
 			j = j + 1
 	#return throu #ana[2] is the throughput, index 0 shows the first lock
-	print_list_vertical(predicted3,"predicted analyzed class 3")
+	#print_list_vertical(predicted3,"predicted analyzed class 3")
+	return predicted3
 
 def pre_process(filename,n):
 	print "Parsing input file:",filename
@@ -285,14 +287,14 @@ def pre_process(filename,n):
 	del relDic[seq_stage_id]
 	threads_l = tryDic.keys()
 	classList = [threads_l[0:n],threads_l[n:2*n],threads_l[2*n:3*n]]
-	print "In pre_process, classList:", classList
+	#print "In pre_process, classList:", classList
 
 	end_time = maxT(relDic.values(),1)[ts_idx] #the timestamp is the second element in the tuple
 	start_time = minT(tryDic.values(),1)[ts_idx]
 	start_run = start_time
-	print "start_time:", start_time, "end_time:", end_time,"Total time:", end_time - start_time
+	#print "start_time:", start_time, "end_time:", end_time,"Total time:", end_time - start_time
 	class1EndT =  get_class_end_time(start_time,classList, class1_idx, relDic) #0 is the class index
-	print "class1EndT:",class1EndT
+	#print "class1EndT:",class1EndT
 
 	l = filter(lambda x: x!= [], relDic.values())
 	startRel = minT(l,1)[1]
@@ -322,26 +324,26 @@ def get_polyfit(data_file):
 	(a_down,b_down) = polyfit(items_down,serv_down,1)
 	print "result of downhill polyfit:", a_down, "b_down:",b_down
 
-	file_target = './dedup_run_on_halvan/dedup_10th_32c_random_input/dedup.native.10th.halvan.random'
-	n = 10
-	tryDic,acqDic,relDic,namesD,start_time,end_time, class1EndT,classList,classL = pre_process(file_target,n)
-	slot_size = get_slot_size(start_time,class1EndT,nDiv)
+	#file_target = './dedup_run_on_halvan/dedup_10th_32c_random_input/dedup.native.10th.halvan.random'
+	#n = 10
+	#tryDic,acqDic,relDic,namesD,start_time,end_time, class1EndT,classList,classL = pre_process(file_target,n)
+	#slot_size = get_slot_size(start_time,class1EndT,nDiv)
 
-	print "analyzing 101010"
-	serv_up_10, items_up_10 = get_n_items_and_serv(start_time,class1EndT,2,0,tryDic,acqDic,relDic,namesD,n,classList,class_id)
+	#print "analyzing 101010"
+	#serv_up_10, items_up_10 = get_n_items_and_serv(start_time,class1EndT,2,0,tryDic,acqDic,relDic,namesD,n,classList,class_id)
 
-	serv_down_10,items_down_10 =  get_n_items_and_serv(class1EndT,end_time,0,slot_size,tryDic,acqDic,relDic,namesD,n,classList,class_id)
-	print "in get_polyfit:"
-	print_list_vertical(serv_up_10,"serv_up_10")
-	print "uphill service time calculated with (a,b) of (2,2,2)"
-	for i in items_up_10:
-		print i*a_up + b_up
+	#serv_down_10,items_down_10 =  get_n_items_and_serv(class1EndT,end_time,0,slot_size,tryDic,acqDic,relDic,namesD,n,classList,class_id)
+	#print "in get_polyfit:"
+	#print_list_vertical(serv_up_10,"serv_up_10")
+	#print "uphill service time calculated with (a,b) of (2,2,2)"
+	#for i in items_up_10:
+	#	print i*a_up + b_up
 	
-	print "downhill real service time:"
-	print_list_vertical(serv_down_10,"serv_down_10")
-	print "downhill service time calculated with (a,b) of (2,2,2)"
-	for i in items_down_10:
-		print i*a_down + b_down 
+#	print "downhill real service time:"
+#	print_list_vertical(serv_down_10,"serv_down_10")
+#	print "downhill service time calculated with (a,b) of (2,2,2)"
+#	for i in items_down_10:
+#		print i*a_down + b_down 
 	return (a_up,b_up,a_down,b_down)
 
 def get_derivative_analysis():
@@ -356,8 +358,10 @@ def get_derivative_analysis():
 	tryDic,acqDic,relDic,namesD,start_time,end_time, class1EndT,classList,classL = pre_process(file_target,n_target)
 	slot_size = get_slot_size(start_time,class1EndT,nDiv)
 
-	serv_l_up = slotted_analyzed(start_time,class1EndT,2,0,tryDic,acqDic,relDic,namesD,n_target,classList) #devide the part before class 1 threads finish into 2 parts
-	serv_l_down = slotted_analyzed(class1EndT,end_time,0,slot_size,tryDic,acqDic,relDic,namesD,n_target,classList)
+	serv_l_up,m3_up,a3_up = slotted_analyzed(start_time,class1EndT,2,0,tryDic,acqDic,relDic,namesD,n_target,classList) #devide the part before class 1 threads finish into 2 parts
+	serv_l_down,m3_down_a3_down = slotted_analyzed(class1EndT,end_time,0,slot_size,tryDic,acqDic,relDic,namesD,n_target,classList)
+	print_list_vertical(m3_up + m3_down ,"measured3")
+	print_list_vertical(a3_up + a3_down ,"analyzed3")
 
 	#**************************************************************#
 	#start prediction, parse the base_file#
@@ -370,7 +374,7 @@ def get_derivative_analysis():
 		uphill_classL = (10,10,10)
 		n_items_l = [216, 654, 1068, 1495, 1981, 2499, 3063, 3667, 4243, 4728]
 		print "predicting uphill:"
-		throughput_up = predict_another_case(tryDic,acqDic,relDic,start_time,class1EndT,classL,uphill_classL,n_items_l,namesD,a_up,b_up,serv_l_up,1)
+		predicted3_up = predict_another_case(tryDic,acqDic,relDic,start_time,class1EndT,classL,uphill_classL,n_items_l,namesD,a_up,b_up,serv_l_up,1)
 
 		n_items_l = [4743, 4318, 3882, 3439, 2983, 2549, 2131, 1692, 1237, 781, 275]
 		print "predicting downhill:"
@@ -378,25 +382,8 @@ def get_derivative_analysis():
 		classL = [[0,1]]
 
 		print "serv_l_down size:", len(serv_l_down)
-		throughput_down = predict_another_case(tryDic,acqDic,relDic,class1EndT,end_time,classL,downhill_classL,n_items_l,namesD,a_down,b_down,serv_l_down,0)
-
-#def analyze_measured():
-	#initlize the number of items left and put and got arrays
-#	data_file = sys.argv[1]
-#	n = (int)sys.argv[2]
-#	nDiv = 10
-#	tryDic,acqDic,relDic,namesD,start_time,end_time, class1EndT,classList,classL = pre_process(data_file,n)
-#	slot_size = get_slot_size(start_time,class1EndT,nDiv)
-
-#	serv_l_up = slotted_analyzed(start_time,class1EndT,2,0,tryDic,acqDic,relDic,namesD,n_target,classList) #devide the part before class 1 threads finish into 2 parts
-#	print "calling get_n_items_and_serv with up hill parameters:"
-#	serv_up, items_up = get_n_items_and_serv(start_time,class1EndT,2,0,tryDic,acqDic,relDic,namesD,n_target,classList)
-#	s_u = serv_up[:]
-#	i_u = items_up[:]
-#	serv_l_down = slotted_analyzed(class1EndT,end_time,0,slot_size,tryDic,acqDic,relDic,namesD,n_target,classList)
-
-
-
+		predicted_down = predict_another_case(tryDic,acqDic,relDic,class1EndT,end_time,classL,downhill_classL,n_items_l,namesD,a_down,b_down,serv_l_down,0)
+	print_list_vertical(predicted3_up + predicted3_down ,"predicted3")
 
 get_derivative_analysis()
 #analyze_measured()
