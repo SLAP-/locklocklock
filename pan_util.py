@@ -147,6 +147,20 @@ def get_num_div(start,end,slot_size):
 	assert slot_size > 0
 	return (end-start)/slot_size
 
+#def get_bucket_proportion(start,end,acqDic,lockid,classList):
+def get_bucket_proportion(start,end,acqDic,lockid,classList):
+		print "in get_bucket_proportion"
+		total_bucket_size = 0
+		bucket_size = 0
+		for lock in range(0, n_locks):
+			prev_put = count_entries(acqDic,class1_idx,lock,start,end,classList)
+			prev_got = count_entries(acqDic,class3_idx,lock,start,end,classList)
+			n = prev_put - prev_got
+			if lock == lockid:
+				bucket_size = n
+			total_bucket_size = total_bucket_size + n
+		return bucket_size/total_bucket_size
+		
 def get_n_items_and_serv(start,end,nDiv,slot_size,tryDic,acqDic,relDic,namesD,n,classList,lockid):
 	service1 = [] #class 1 service time
 	service3 = []
@@ -169,6 +183,7 @@ def get_n_items_and_serv(start,end,nDiv,slot_size,tryDic,acqDic,relDic,namesD,n,
 			service3.append(serv[1][0])
 		elif len(serv) == 1:
 			service3.append(serv[0][0])
+	print "in get_n_items_and_serv: hashtable lock0 bucket size / sum of all buckets: "  
 	return [service1, service3], n_items[lockid]
 
 def get_ts(tryDic,acqDic,relDic,slot_size, start, end, nDiv):
@@ -246,10 +261,12 @@ def get_throughput_from_l(l):
 		return (0,l)
 
 def iterative_throughput_s_mva(throu1, throu3, s1, s3 ,serv,res,newClassL):
-	print "in iterative_throughput_s_mva:"
+	lockid = 0
+	print "in iterative_throughput_s_mva: the real class 1 service time:", serv[0][class1_idx]
+
 	for i in range(0,5): #TOFIX: change this to convergence condition
 		ana = mva_multiclass(res[0],serv,newClassL,res[3]) #do an initial analysis
-		(throu1,throu3) = get_throughput_from_l(ana[2][0])
+		(throu1,throu3) = get_throughput_from_l(ana[2][lockid])
 		oh = get_contention_overhead(throu1,throu3) #overhead
 		#plug the service time back in
 		s1 = serv[0][class1_idx] #res_up[1] is the service time matrix
@@ -375,6 +392,7 @@ def get_polyfit(data_file):
 	(a3_down,b3_down) = polyfit(items_down,serv_down[class3_idx],1)
 	print "result of downhill polyfit:", a3_down, "b3_down:",b3_down
 	#check_fitting(a_up,b_up,a_down,b_down,class_idx)
+	#print "calculating the proportion of lock0 hashtable uphill:", items_up[lockid]/sum(items_up) 
 	return (a1_up,b1_up,a3_up,b3_up,a3_down,b3_down)
 
 def get_derivative_analysis():
@@ -416,6 +434,18 @@ def get_derivative_analysis():
 
 		print "serv_l_down size:", len(serv_l_down)
 		p1_down,p3_down,p1_w_cont_down,p3_w_cont_down =  predict_another_case(tryDic,acqDic,relDic,class1EndT,end_time,classL,downhill_classL,n_items_l,namesD,a1_down,b1_down,a3_down,b3_down,serv_l_down,0)
+
+	#for index,i in enumerate(n_items_l):
+		#print i,"\t",m3_up[index],a3_up[index],p3_up[index],p3_w_cont_up[index]
+	#print len(m3_up),len(a3_up), len(p3_up),len(p3_w_cond_up)
+	print "m3_up:"
+	print m3_up
+	print "a3_up:"
+	print a3_up
+	print "p3_up:"
+	print p3_up
+	print "p3_w_cont__up:"
+	print p3_w_cont_up
 	#print_list_vertical(predicted3_up + predicted3_down ,"predicted3")
 
 get_derivative_analysis()
